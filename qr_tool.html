@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QR Reader & Generator</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;--card:#fff;--bg:#f4f6f8;--accent:#6c63ff}
+    body{margin:0;background:var(--bg);padding:24px;color:#0f1724}
+    .container{max-width:900px;margin:0 auto}
+    h1{font-size:20px;margin:0 0 12px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .card{background:var(--card);padding:16px;border-radius:12px;box-shadow:0 6px 18px rgba(15,23,36,0.06)}
+    .hint{font-size:13px;color:#475569;margin-bottom:8px}
+    .dropzone{border:2px dashed #cbd5e1;border-radius:8px;padding:14px;text-align:center;cursor:pointer}
+    input[type=file]{display:none}
+    .result{margin-top:10px;padding:10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0}
+    .btn{display:inline-block;padding:8px 12px;border-radius:8px;background:var(--accent);color:white;text-decoration:none;border:none;cursor:pointer}
+    .btn.secondary{background:#e2e8f0;color:#0f1724}
+    .small{font-size:13px;padding:6px 8px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    textarea{width:100%;min-height:80px;padding:10px;border-radius:8px;border:1px solid #cbd5e1}
+    .qrcode-wrap{text-align:center;margin-top:12px}
+    canvas{max-width:100%;height:auto}
+    .copy{background:#0ea5a4;color:white}
+    .meta{font-size:13px;color:#334155}
+    @media (max-width:800px){.grid{grid-template-columns:1fr}}
+    video{width:100%;border-radius:8px;margin-top:10px}
+    .color-inputs{display:flex;gap:8px;align-items:center;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>QR Reader & Generator</h1>
+    <p class="hint">Paste an image (Ctrl+V), upload one, or scan using your webcam. Generate colorful QR codes from text.</p>
+
+    <div class="grid">
+      <!-- Reader -->
+      <div class="card" id="readerCard">
+        <strong>Read QR code</strong>
+        <label class="dropzone" id="dropzone">Click or drop image here to upload
+          <input id="fileInput" type="file" accept="image/*">
+        </label>
+        <div class="controls">
+          <button class="btn small" id="decodeBtn">Decode current image</button>
+          <button class="btn small secondary" id="clearReader">Clear</button>
+          <button class="btn small" id="startCam">Start Camera</button>
+          <button class="btn small secondary" id="stopCam">Stop Camera</button>
+        </div>
+        <video id="video" playsinline></video>
+        <div class="result" id="readerResult">No image loaded.</div>
+        <div id="readerImagePreview" style="margin-top:10px;text-align:center"></div>
+      </div>
+
+      <!-- Generator -->
+      <div class="card" id="generatorCard">
+        <strong>Generate QR code</strong>
+        <textarea id="genInput" placeholder="Paste text or URL here"></textarea>
+        <div class="color-inputs">
+          Foreground: <input type="color" id="fgColor" value="#000000">
+          Background: <input type="color" id="bgColor" value="#ffffff">
+        </div>
+        <div class="controls">
+          <button class="btn" id="generateBtn">Generate</button>
+          <button class="btn secondary" id="clearGen">Clear</button>
+          <button class="btn small" id="downloadGen" style="display:none">Download PNG</button>
+          <button class="btn small" id="shareGen" style="display:none">Share</button>
+        </div>
+        <div class="qrcode-wrap" id="qrcodeWrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AdSense placeholder -->
+  <div style="margin-top:20px;text-align:center;">
+    <!-- Replace with your AdSense code after approval -->
+    <p style="font-size:12px;color:#666;">Ad space</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+
+  <script>
+    const dropzone=document.getElementById('dropzone');
+    const fileInput=document.getElementById('fileInput');
+    const readerResult=document.getElementById('readerResult');
+    const readerImagePreview=document.getElementById('readerImagePreview');
+    const decodeBtn=document.getElementById('decodeBtn');
+    const clearReader=document.getElementById('clearReader');
+    const video=document.getElementById('video');
+    const startCam=document.getElementById('startCam');
+    const stopCam=document.getElementById('stopCam');
+    let lastImage=null;
+    let camStream=null;
+
+    function isURL(str){try{new URL(str);return true}catch{return false}}
+    function showResult(text){
+      if(!text){readerResult.innerHTML='<em>No QR found.</em>';return}
+      const esc=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if(isURL(text.trim())){
+        readerResult.innerHTML=`<div><strong>URL detected:</strong> <a href="${esc}" target="_blank">${esc}</a></div>`;
+      }else{
+        readerResult.innerHTML=`<div><strong>Decoded text:</strong><pre>${esc}</pre></div>`;
+      }
+    }
+    function displayImage(img){readerImagePreview.innerHTML='';img.style.maxWidth='100%';readerImagePreview.appendChild(img)}
+    async function decodeFromImageElement(img){
+      const canvas=document.createElement('canvas');
+      canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+      const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);
+      const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+      const code=jsQR(imageData.data,canvas.width,canvas.height);
+      showResult(code?code.data:null);
+    }
+    function handleBlob(blob){
+      const img=new Image();
+      img.onload=()=>{lastImage=img;displayImage(img);decodeFromImageElement(img)};
+      img.src=URL.createObjectURL(blob);
+    }
+    fileInput.addEventListener('change',e=>{if(e.target.files[0])handleBlob(e.target.files[0])});
+    dropzone.addEventListener('click',()=>fileInput.click());
+    dropzone.addEventListener('dragover',e=>{e.preventDefault()});
+    dropzone.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files[0])handleBlob(e.dataTransfer.files[0])});
+    document.addEventListener('paste',e=>{
+      for(const it of e.clipboardData.items){
+        if(it.type.indexOf('image')!==-1){handleBlob(it.getAsFile());return}
+      }
+    });
+    decodeBtn.addEventListener('click',()=>{if(lastImage)decodeFromImageElement(lastImage)});
+    clearReader.addEventListener('click',()=>{lastImage=null;readerImagePreview.innerHTML='';readerResult.textContent='No image loaded.'});
+
+    // Camera scanning
+    startCam.addEventListener('click',async()=>{
+      try{
+        camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+        video.srcObject=camStream;video.play();
+        const scan=()=>{
+          if(video.readyState===video.HAVE_ENOUGH_DATA){
+            const canvas=document.createElement('canvas');
+            canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+            const ctx=canvas.getContext('2d');ctx.drawImage(video,0,0);
+            const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+            const code=jsQR(imageData.data,canvas.width,canvas.height);
+            if(code){showResult(code.data)}
+          }
+          requestAnimationFrame(scan);
+        };
+        scan();
+      }catch(err){alert('Camera access denied.')}
+    });
+    stopCam.addEventListener('click',()=>{if(camStream){camStream.getTracks().forEach(t=>t.stop());video.srcObject=null}});
+
+    // Generator with color options
+    const genInput=document.getElementById('genInput');
+    const fgColor=document.getElementById('fgColor');
+    const bgColor=document.getElementById('bgColor');
+    const generateBtn=document.getElementById('generateBtn');
+    const qrcodeWrap=document.getElementById('qrcodeWrap');
+    const downloadGen=document.getElementById('downloadGen');
+    const shareGen=document.getElementById('shareGen');
+    const clearGen=document.getElementById('clearGen');
+
+    async function generateQR(text,fg,bg){
+      qrcodeWrap.innerHTML='';
+      if(!text)return;
+      const dataUrl=await QRCode.toDataURL(text,{color:{dark:fg,light:bg},width:300});
+      const img=new Image();img.src=dataUrl;qrcodeWrap.appendChild(img);
+      downloadGen.style.display='inline-block';
+      downloadGen.onclick=()=>{const a=document.createElement('a');a.href=dataUrl;a.download='qrcode.png';a.click()};
+      shareGen.style.display=navigator.share?'inline-block':'none';
+      shareGen.onclick=async()=>{const res=await fetch(dataUrl);const blob=await res.blob();const file=new File([blob],'qrcode.png',{type:blob.type});await navigator.share({files:[file],title:'QR Code',text})};
+    }
+    generateBtn.addEventListener('click',()=>generateQR(genInput.value.trim(),fgColor.value,bgColor.value));
+    clearGen.addEventListener('click',()=>{genInput.value='';qrcodeWrap.innerHTML='';downloadGen.style.display='none';shareGen.style.display='none'});
+  </script>
+</body>
+</html>
